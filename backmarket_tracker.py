@@ -11,7 +11,9 @@ Made by 0xlazY !
 '''
 
 import requests, re
+from notify_run import Notify
 #from notify_run import Notify ## TODO
+
 
 def get_currency(url):
 
@@ -46,24 +48,46 @@ def get_currency(url):
 
 def get_webcontent(url):
 
+
+    #Getting the URL and decoding it to allow for the prices to be found
     page = requests.get(url)
     content = page.content.decode()
+
     currency_symbole, country = get_currency(url)
 
-    pattern = 'price_with_currency.\".{0,9}.\"'
-    raw_prices = re.findall(pattern, content) # Parse the entire WebPage, search 'price_with_currency*€'
+    #Start of the pattern used for pricing within the HTML
+    pattern = '<div class="body-2-light text-center text-primary-light">' + '\\n' + '      '
+
+    if currency_symbole == '€' and country != 'at': ## If the symbol is at the end (Has the space as well)
+        pattern +=  '[0-9]+' + '.' + '[0-9]+' + ' €'
+    elif country == 'at':                           ## If within the 'at' region the euro is at the front
+        pattern +=  '€' + '[0-9]+' + '.' + '[0-9]+'
+
+    elif currency_symbole == '£':                   ##If within a 'uk' region pound is at the front
+        pattern += '£' + '[0-9]+' + '.' + '[0-9]+'
+    else:                                           ##Only leaves 'com' region with dollar at the front
+        pattern += '$' + '[0-9]+' + '.' + '[0-9]+'
+
+    raw_prices = re.findall(pattern, content) # Go through source and find the pattern noted above
     #print(raw_prices) ## debug
 
     price_lst = []
 
     for price in raw_prices:
+        price = re.sub('<div class="body-2-light text-center text-primary-light">\\n      ', '', price) ##Removing any excess data, leaving only the price plus their currency symbol
+                
         try: # because of potential problems when loading webpages and inconsistency, use 'try' before any index reference ([.])
-            if currency_symbole == '€' and country != 'at': ## symbole after price
-                parsed_price = float(price.strip().split('"')[1].split('\xa0')[0].replace(',', '.')) # get rid of all the junk
+            ##Going through same as before but removing the symbol to allow for it to be translated into a float for comparison
+            if currency_symbole == '€' and country != 'at':
+                parsed_price = re.sub(' €', '', price)
             elif country == 'at':
-                parsed_price = float(price.strip().split('"')[1].split('\xa0')[1].replace(',', '.'))
-            else: ## symbole before price
-                parsed_price = float(price.strip().split('"')[1].replace(currency_symbole, ''))
+                parsed_price = re.sub('€', '', price)
+            elif currency_symbole == '£': ## symbole before price
+                parsed_price = re.sub('£', '', price)
+            else:
+                parsed_price = re.sub('$', '', price)
+
+            parsed_price = float(parsed_price) ##Actually converting it here
 
             if parsed_price > false_positive_price:
                 price_lst.append(parsed_price) # add the formated price to the price_lst
@@ -83,15 +107,26 @@ def alerter(price_lst, currency_symbole):
     if minimum_price <= price_wanted:
         headers = {'Content-Type': 'text/text; charset=utf-8'} # needed to send specials char such as € ...
         data_text = '{}\'s price has drop to {}{} !'.format(device_name, minimum_price, currency_symbole)
-
+        
+        notify.send(data_text)
         requests.post(notify_run_url, data = data_text.encode('utf-8'), headers = headers) # Send POST request to notidy_run channel
+    notify.send("Test Message using Python!")
+    headers = {'Content-Type': 'text/text; charset=utf-8'} # needed to send specials char such as € ...
+    requests.post(notify_run_url, data = "Test Message using Python!".encode('utf-8'), headers = headers) # Send POST request to notidy_run channel
 
+    
 def get_notify_run_url(config_file):
     conf = open(config_file, 'r')
     conf_url = conf.readline().strip()
     conf.close()
 
     return conf_url
+
+def set_notify_run_url(config_file, notify_url):
+    conf = open(config_file,'w')
+    conf.truncate()
+    conf.write(notify_url)
+
 
 
 def main():
@@ -104,16 +139,31 @@ def main():
 
 
 if __name__ == '__main__':
-    url_lst = ['https://www.backmarket.at/iphone-x-64-gb-space-grau-ohne-vertrag-gebraucht/36833.html']
-    device_name = 'iPhone X'
+    url_lst = ['https://www.backmarket.co.uk/en-gb/p/samsung-galaxy-note-20-ultra-5g-512-gb-black-unlocked/92afb688-6ece-4eab-afdf-5afa77242a54#l=11&scroll=false',]
+#    url_lst = ['https://www.backmarket.co.uk/en-gb/p/iphone-se-2020-128-gb-black-unlocked/aa2db197-2380-4cbc-a55c-8c7df1df656c#l=10',]
+
+    device_name = 'Samsung Galaxy Note20 Ultra 5G Dual Sim'
+ 
+#    device_name = 'iPhone SE (2020)'
+
     # i.e, iPhone X 64gb Black
 
     notify_run_url = get_notify_run_url('config.cfg')
+    
+    if notify_run_url == "https://notify.run/XXXXXXXXXXXX":
+        print("Creating a new channel!")
+        notify = Notify()
+        notify.register()
+        set_notify_run_url('config.cfg', notify.endpoint)
+    else:
+        print("Opening channel already set in config file!")
+        notify = Notify(endpoint=notify_run_url)
+
+
     # Create a notify_run channel and replace the url in config file (https://notify.run)
     ## TODO add channel creation with notidy_run module
 
     false_positive_price = 100 # Impossible price for the specified product
-    price_wanted = 400 # Price of the product below which you want to receive a notification
+    price_wanted = 550 # Price of the product below which you want to receive a notification
 
     main()
-
